@@ -3,8 +3,11 @@ package com.KKStands.GitHubExtends.GitHubRepoKK.Service;
 import com.KKStands.GitHubExtends.GitHubRepoKK.DTO.*;
 import com.KKStands.GitHubExtends.GitHubRepoKK.Entity.GHubRepoEntity;
 import com.KKStands.GitHubExtends.GitHubRepoKK.Repository.GHubRepoRepository;
+import com.KKStands.GitHubExtends.GitHubRepoKK.Utils.SortTypeOption;
+import jakarta.persistence.criteria.Predicate;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Sort;
+import org.springframework.data.jpa.domain.Specification;
 import org.springframework.stereotype.Service;
 
 import java.time.ZonedDateTime;
@@ -34,49 +37,46 @@ public class GHubRepoService {
     }
 
     public GetRepositoriesResponseDTO getRepositories(String language, Integer minStars, String sortBy) {
-        // Default sort
-        if (sortBy == null || sortBy.isBlank()) {
-            sortBy = "stars";
+
+        SortTypeOption sortOption;
+        try {
+            sortOption = (sortBy == null || sortBy.isBlank()) ? SortTypeOption.STARS : SortTypeOption.valueOf(sortBy.trim().toUpperCase());
+        } catch (IllegalArgumentException e) {
+            // Invalid sort value fallback
+            sortOption = SortTypeOption.STARS;
         }
 
-        Sort.Direction direction = Sort.Direction.DESC;
-        Sort sort;
-        switch (sortBy.toLowerCase()) {
-            case "forks":
-                sort = Sort.by(direction, "forks");
-                break;
-            case "updated":
-                sort = Sort.by(direction, "lastUpdated");
-                break;
-            case "stars":
-            default:
-                sort = Sort.by(direction, "stars");
-                break;
+        String sortField;
+        switch (sortOption) {
+            case FORKS:   sortField = "forks"; break;
+            case UPDATED: sortField = "lastUpdated"; break;
+            case STARS:
+            default:      sortField = "stars"; break;
         }
 
-        // Retrieve and filter results by criteria
-        String finalSortBy = sortBy;
-        List<GHubRepoEntity> entities = repository.findAll().stream()
-                .filter(repo -> (language == null || language.isBlank() || language.equalsIgnoreCase(repo.getLanguage())))
-                .filter(repo -> (minStars == null || repo.getStars() >= minStars))
-                .sorted((r1, r2) -> {
-                    switch (finalSortBy.toLowerCase()) {
-                        case "forks":
-                            return r2.getForks().compareTo(r1.getForks());
-                        case "updated":
-                            return r2.getLastUpdated().compareTo(r1.getLastUpdated());
-                        case "stars":
-                        default:
-                            return r2.getStars().compareTo(r1.getStars());
-                    }
-                })
-                .collect(Collectors.toList());
+        Sort sort = Sort.by(Sort.Direction.DESC, sortField);
 
-        List<RepositoryResponseDTO> resultDtos = entities.stream()
+        Specification<GHubRepoEntity> spec = (root, query, criteriaBuilder) -> {
+            Predicate predicate = criteriaBuilder.conjunction();
+
+            if (language != null && !language.isBlank()) {
+                predicate = criteriaBuilder.and(predicate,
+                        criteriaBuilder.equal(criteriaBuilder.lower(root.get("language")), language.toLowerCase()));
+            }
+            if (minStars != null) {
+                predicate = criteriaBuilder.and(predicate,
+                        criteriaBuilder.greaterThanOrEqualTo(root.get("stars"), minStars));
+            }
+            return predicate;
+        };
+
+        List<GHubRepoEntity> entities = repository.findAll(spec, sort);
+
+        List<RepositoryResponseDTO> dtos = entities.stream()
                 .map(this::mapEntityToDto)
                 .collect(Collectors.toList());
 
-        return new GetRepositoriesResponseDTO(resultDtos);
+        return new GetRepositoriesResponseDTO(dtos);
     }
     private GHubRepoEntity mapDTOtoEntity(GHubRepoDTO dto) {
         GHubRepoEntity entity = new GHubRepoEntity();
