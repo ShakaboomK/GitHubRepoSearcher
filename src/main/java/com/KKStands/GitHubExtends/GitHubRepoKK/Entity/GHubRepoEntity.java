@@ -13,7 +13,7 @@ import java.time.ZonedDateTime;
 @Data
 public class GHubRepoEntity {
     @Id
-    private Long id; // GitHub's repo ID
+    private Long id;
 
     private String name;
 
